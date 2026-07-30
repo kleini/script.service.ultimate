@@ -14,6 +14,7 @@ from .drm_key_manager import KeyConfiguration
 from .representation_blocklist import RepresentationBlocklist
 from .video_quality import VideoQualityFilter, VideoRepresentation
 from .time_utils import parse_iso_duration
+from .jwt_utils import decode_claims, get_expiry
 
 __all__ = [
     "logger",
@@ -32,4 +33,6 @@ __all__ = [
     "VideoQualityFilter",
     "VideoRepresentation",
     "parse_iso_duration",
+    "decode_claims",
+    "get_expiry",
 ]

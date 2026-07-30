@@ -7,9 +7,11 @@ Two-phase plugin processing: GENERIC plugins first, then system-specific.
 import time
 from threading import Lock
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlsplit
 
 from .drm import DRMPluginManager
 from .models import DRMSystem, DRMConfig
+from .utils.jwt_utils import get_expiry
 from .utils.logger import logger
 
 
@@ -53,16 +55,38 @@ class DRMConfigCache:
         self.ttl = ttl_seconds
         self.lock = Lock()
 
+    @staticmethod
+    def _has_expired_license_token(drm_configs: List) -> bool:
+        """
+        Check whether a license URL carries an already-expired session token.
+
+        License URLs can embed a JWT as a token= parameter (the theplatform
+        persona token used by magenta2/magentaeu). These tokens can expire
+        before cache TTL resulting in rejected playback.
+        """
+        for config in drm_configs:
+            server_url = getattr(getattr(config, "license", None), "server_url", None)
+            if not server_url:
+                continue
+            for token in parse_qs(urlsplit(server_url).query).get("token", []):
+                expiry = get_expiry(token)
+                if expiry is not None and time.time() >= expiry:
+                    return True
+        return False
+
     def get(self, key: str) -> Optional[List]:
         with self.lock:
             if key in self.cache:
                 drm_configs, timestamp = self.cache[key]
-                if time.time() - timestamp < self.ttl:
-                    logger.debug(f"DRM Config Cache HIT for {key}")
-                    return drm_configs
-                else:
+                if time.time() - timestamp >= self.ttl:
                     logger.debug(f"DRM Config Cache EXPIRED for {key}")
                     del self.cache[key]
+                elif self._has_expired_license_token(drm_configs):
+                    logger.debug(f"DRM Config Cache TOKEN EXPIRED for {key}")
+                    del self.cache[key]
+                else:
+                    logger.debug(f"DRM Config Cache HIT for {key}")
+                    return drm_configs
         return None
 
     def set(self, key: str, drm_configs: List):

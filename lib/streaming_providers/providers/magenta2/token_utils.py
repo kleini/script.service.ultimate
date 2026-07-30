@@ -6,11 +6,11 @@ Consolidates all JWT parsing and persona token composition logic
 """
 
 import base64
-import json
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from ...base.utils.jwt_utils import decode_claims, get_expiry
 from ...base.utils.logger import logger
 
 
@@ -105,20 +105,10 @@ class JWTParser:
             JWTClaims object or None if parsing fails
         """
         try:
-            # Decode JWT
-            parts = jwt_token.split(".")
-            if len(parts) != 3:
+            raw_claims = decode_claims(jwt_token)
+            if raw_claims is None:
                 logger.warning("Invalid JWT format - expected 3 parts")
                 return None
-
-            # Decode payload with padding
-            payload_b64 = parts[1]
-            padding = len(payload_b64) % 4
-            if padding:
-                payload_b64 += "=" * (4 - padding)
-
-            payload_json = base64.b64decode(payload_b64).decode("utf-8")
-            raw_claims = json.loads(payload_json)
 
             logger.debug(f"JWT parsed successfully - claims: {list(raw_claims.keys())}")
 
@@ -162,17 +152,7 @@ class JWTParser:
             Dictionary of raw claims or None
         """
         try:
-            parts = jwt_token.split(".")
-            if len(parts) != 3:
-                return None
-
-            payload_b64 = parts[1]
-            padding = len(payload_b64) % 4
-            if padding:
-                payload_b64 += "=" * (4 - padding)
-
-            payload_json = base64.b64decode(payload_b64).decode("utf-8")
-            return json.loads(payload_json)
+            return decode_claims(jwt_token)
 
         except Exception as e:
             logger.debug(f"Failed to extract raw JWT claims: {e}")
@@ -248,14 +228,8 @@ class PersonaTokenComposer:
 
     @staticmethod
     def _get_jwt_expiry(jwt_token: str) -> Optional[float]:
-        """Extract expiry from any JWT token using existing JWTParser"""
-        try:
-            claims = JWTParser.parse(jwt_token)
-            if claims and claims.raw_claims and "exp" in claims.raw_claims:
-                return float(claims.raw_claims["exp"])
-        except Exception as e:
-            logger.debug(f"Failed to extract expiry from JWT: {e}")
-        return None
+        """Extract expiry from any JWT token"""
+        return get_expiry(jwt_token)
 
     @staticmethod
     def _compose_token(account_uri: str, persona_jwt: str) -> Optional[str]:
