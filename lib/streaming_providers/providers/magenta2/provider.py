@@ -707,6 +707,11 @@ class Magenta2Provider(StreamingProvider):
     def get_catchup_manifest(
         self, content_id: str, start_time: int, end_time: int, drm_variant: Optional[str] = "auto", **kwargs: Any
     ) -> Optional[str]:
+        # The DVR URL is built from the cached live manifest, and that cache is
+        # keyed by playback_id, so translate a station_id here exactly like
+        # get_manifest() does for live. Without it the lookup always misses and
+        # catchup answers 404 even though the live manifest is cached.
+        content_id = self._get_playback_id(content_id)
         return self._playback_manager.get_catchup_manifest(
             content_id, start_time, end_time, drm_variant, **kwargs
         )
