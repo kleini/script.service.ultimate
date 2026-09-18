@@ -96,6 +96,12 @@ class TTLCache:
                 logger.debug(f"TTLCache: EVICTED (size bound) '{evicted}'")
         logger.debug(f"TTLCache: SET '{key}'")
 
+    def delete(self, key: str) -> None:
+        with self._lock:
+            removed = self._data.pop(key, None) is not None
+        if removed:
+            logger.debug(f"TTLCache: DELETED '{key}'")
+
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
@@ -234,6 +240,39 @@ class DRMOperations:
     # THE PIPELINE
     # ==========================================================================
 
+    def _cached_configs(self, cache_key: str, provider) -> Optional[List[DRMConfig]]:
+        """Read the cache, giving the provider a veto over what comes back.
+
+        The TTL runs from the moment an entry was stored, while a license token
+        inside a config expires at a wall-clock time of the provider's
+        choosing. Nothing relates the two, so an entry can still be live by the
+        cache's reckoning and already be worthless — the license server answers
+        HTTP 401 and playback fails for the rest of the entry's lifetime.
+        Providers that can read their own token say so via
+        drm_configs_expired(); the default keeps the entry, so this is inert
+        for every provider that has no opinion.
+
+        Returns a copy on a hit, or None when the caller should resolve again.
+        """
+        cached = self.drm_config_cache.get(cache_key)
+        if cached is None:
+            return None
+
+        try:
+            expired = provider.drm_configs_expired(cached)
+        except Exception as e:
+            # A provider that cannot answer must not take playback down with
+            # it: keep the entry and let the license request decide.
+            logger.debug(f"drm_configs_expired() failed for '{cache_key}': {e}")
+            return list(cached)
+
+        if expired:
+            logger.info(f"DRM configs for '{cache_key}' expired before their cache entry, re-resolving")
+            self.drm_config_cache.delete(cache_key)
+            return None
+
+        return list(cached)
+
     def _resolve_content_drm(
         self,
         provider,
@@ -246,16 +285,16 @@ class DRMOperations:
     ) -> List[DRMConfig]:
         cache_key = self._config_cache_key(base_cache_key)
 
-        cached = self.drm_config_cache.get(cache_key)
+        cached = self._cached_configs(cache_key, provider)
         if cached is not None:
-            return list(cached)
+            return cached
 
         # Single-flight: concurrent misses for the same key run the full
         # pipeline exactly once; the others wait and hit the cache.
         with self._keyed_locks.for_key(cache_key):
-            cached = self.drm_config_cache.get(cache_key)  # double-check under lock
+            cached = self._cached_configs(cache_key, provider)  # double-check under lock
             if cached is not None:
-                return list(cached)
+                return cached
 
             result = self._compute_content_drm(
                 provider, provider_name, channel_id, base_cache_key,
