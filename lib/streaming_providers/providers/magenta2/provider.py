@@ -47,12 +47,13 @@ from .constants import (
     SUPPORTED_COUNTRIES,
 )
 from .discovery import DiscoveryService
+from .drm_validity import Magenta2DrmValidityMixin
 from .endpoint_manager import EndpointManager
 from .models import Magenta2PlaybackRestrictedException  # noqa: F401 – re-exported
 from .auth_bridge import AuthBridge
 
 
-class Magenta2Provider(StreamingProvider):
+class Magenta2Provider(Magenta2DrmValidityMixin, StreamingProvider):
     PROVIDER_LABEL: ClassVar[str] = "Magenta TV 2.0"
     PROVIDER_LOGO: ClassVar[str] = MAGENTA2_LOGO
     implements_timers: ClassVar[bool] = True
