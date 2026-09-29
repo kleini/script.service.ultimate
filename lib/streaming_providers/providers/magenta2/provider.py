@@ -17,6 +17,8 @@ that delegates to the domain managers:
 import hashlib
 import random
 import threading
+import time
+import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, ClassVar, Dict, List, NamedTuple, Optional, Tuple, cast, Union
@@ -57,6 +59,16 @@ from .discovery import DiscoveryService
 from .endpoint_manager import EndpointManager
 from .models import Magenta2PlaybackRestrictedException  # noqa: F401 – re-exported
 from .auth_bridge import AuthBridge
+from .token_utils import JWTParser
+
+# The license server URL carries the entitlement JWT as a query parameter;
+# theplatform mints one per day, so a config cached late in the day outlives
+# its token well inside the DRM cache TTL. See drm_configs_expired().
+_LICENSE_TOKEN_QUERY_PARAM = "token"
+
+# Treat a token seconds from expiring as already expired: the config is handed
+# to the client first and only then used to fetch a license.
+_LICENSE_EXPIRY_MARGIN_SECONDS = 60
 
 # drm_variant vocabulary as documented by ProviderCatchupMixin — used only
 # for the epg_id misroute warning in get_catchup_manifest().
@@ -1075,6 +1087,52 @@ class Magenta2Provider(StreamingProvider):
         if content_type == CONTENT_TYPE_LIVE:
             content_id = self._get_playback_id(content_id, managers.channel)
         return managers.playback.get_drm(content_id, content_type, **kwargs)
+
+    def drm_configs_expired(self, drm_configs: List[DRMConfig]) -> bool:
+        """Report cached DRM configs whose license token has run out.
+
+        Satisfies DrmValidityProtocol (base/protocols.py). theplatform mints
+        one entitlement token per day — iat and exp fall on local midnight
+        rather than being issued per request — so a config resolved late in
+        the day is cached with a token that dies before the entry does, and
+        every license request made from it answers HTTP 401 until then.
+        """
+        deadline = time.time() + _LICENSE_EXPIRY_MARGIN_SECONDS
+
+        for config in drm_configs or []:
+            license_config = getattr(config, "license", None)
+            server_url = getattr(license_config, "server_url", None)
+            if not server_url:
+                continue
+
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(server_url).query)
+            token = query.get(_LICENSE_TOKEN_QUERY_PARAM)
+            if not token:
+                continue
+
+            # extract_raw_claims() rather than parse(): this is an entitlement
+            # token, not a persona token, so parse()'s claim mapping finds
+            # nothing to map and warns about it on every check.
+            expiry = (JWTParser.extract_raw_claims(token[0]) or {}).get("exp")
+            if expiry is None:
+                # Not a JWT, or no exp claim: nothing to judge it by, so keep
+                # the entry rather than discard a config that may be good.
+                continue
+
+            if float(expiry) <= deadline:
+                remaining = float(expiry) - time.time()
+                when = (
+                    f"expired {-remaining:.0f}s ago" if remaining < 0
+                    else f"expires in {remaining:.0f}s, inside the "
+                         f"{_LICENSE_EXPIRY_MARGIN_SECONDS}s margin"
+                )
+                logger.info(
+                    f"{self.provider_name}: license token for "
+                    f"{getattr(config, 'system', '?')} {when}, discarding cached DRM config"
+                )
+                return True
+
+        return False
 
     def get_catchup_manifest(
         self,

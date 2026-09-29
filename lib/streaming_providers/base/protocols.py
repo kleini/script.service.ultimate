@@ -76,6 +76,28 @@ class PlaybackAuthorizationProtocol(Protocol):
 
 
 @runtime_checkable
+class DrmValidityProtocol(Protocol):
+    """
+    Optional shape for a provider that can tell when its own cached DRM
+    configs have gone stale.
+
+    The DRM config cache ages entries from the moment they were stored,
+    while a license token inside a config expires at a wall-clock time the
+    provider chose. Nothing relates the two, so an entry can still be live
+    by the cache's reckoning and already be worthless -- the license server
+    answers HTTP 401 for the rest of the entry's lifetime.
+
+    Providers that can read the expiry of their own token implement this;
+    DRMOperations calls it on every cache hit and resolves again when it
+    returns True. Providers that cannot tell simply do not define the
+    method, which is why this is checked by shape rather than inherited.
+    """
+
+    def drm_configs_expired(self, drm_configs: List["DRMConfig"]) -> bool:
+        """Return True to discard the cached configs and resolve again."""
+        ...
+
+
 class DrmManagerProtocol(Protocol):
     """
     Shape for a provider's dedicated DRM manager (if it has one).
