@@ -27,6 +27,7 @@ from .models import DRMConfig, Event, StreamingChannel
 from .provider_mixins.auth import ProviderAuthMixin
 from .provider_mixins.bookmarks import ProviderBookmarksMixin
 from .provider_mixins.catchup import ProviderCatchupMixin
+from .provider_mixins.drm_validity import ProviderDrmValidityMixin
 from .provider_mixins.epg import ProviderEpgMixin
 from .provider_mixins.favorites import ProviderFavoritesMixin
 from .provider_mixins.http import ProviderHttpMixin
@@ -50,6 +51,7 @@ class StreamingProvider(
     ProviderFavoritesMixin,
     ProviderCatchupMixin,
     ProviderSubscriptionsMixin,
+    ProviderDrmValidityMixin,
 ):
     """
     Abstract base class for streaming providers with centralized HTTP and auth management

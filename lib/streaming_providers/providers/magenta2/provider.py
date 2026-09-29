@@ -54,6 +54,7 @@ from .constants import (
 )
 from . import constants as _constants
 from .discovery import DiscoveryService
+from .drm_validity import Magenta2DrmValidityMixin
 from .endpoint_manager import EndpointManager
 from .models import Magenta2PlaybackRestrictedException  # noqa: F401 – re-exported
 from .auth_bridge import AuthBridge
@@ -92,7 +93,7 @@ class _ManagerBundle(NamedTuple):
     epg: Magenta2EpgManager
 
 
-class Magenta2Provider(StreamingProvider):
+class Magenta2Provider(Magenta2DrmValidityMixin, StreamingProvider):
     """
     Magenta2 streaming provider implementation with enhanced dynamic discovery.
     """
